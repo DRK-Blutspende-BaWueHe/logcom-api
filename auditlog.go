@@ -111,7 +111,7 @@ func GetModelChanges(ctx context.Context, oldModel, newModel interface{}, ignore
 			}
 
 			if (kindOfOldModelField >= reflect.Array) && (kindOfOldModelField != reflect.String) {
-				if reflect.DeepEqual(valueOfOldModelField, valueOfNewModelField) {
+				if !reflect.DeepEqual(valueOfOldModelField, valueOfNewModelField) {
 					changes = append(changes, ModelChange{
 						PropertyName: fieldNameOfOldModel,
 						OldValue:     valueOfOldModelField,
