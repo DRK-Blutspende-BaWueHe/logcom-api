@@ -209,6 +209,13 @@ func SendAuditLogWithModification(ctx context.Context, subject, subjectName stri
 	return sendAuditLogWithModification(ctx, subject, subjectName, oldValue, newValue, ignoredProperties...)
 }
 
+func SendAuditLogWithCustomAction(ctx context.Context, action, subject, subjectName string, oldValue, newValue interface{}, ignoredProperties ...string) error {
+	if ctx == context.TODO() || ctx == context.Background() {
+		return errors.New("context cannot be empty")
+	}
+	return sendAuditLogWithCustomAction(ctx, action, subject, subjectName, oldValue, newValue, ignoredProperties...)
+}
+
 func SendAuditLogWithModificationModelChanges(ctx context.Context, subject, subjectName string, changes []ModelChange) error {
 	if ctx == context.TODO() || ctx == context.Background() {
 		return errors.New("context cannot be empty")
@@ -348,6 +355,57 @@ func sendAuditLogWithDeletion(ctx context.Context, subject, subjectName string, 
 		Subject:     subject,
 		SubjectName: &subjectName,
 	})
+}
+
+func sendAuditLogWithCustomAction(ctx context.Context, action, subject, subjectName string, oldValue, newValue interface{}, ignoredProperties ...string) error {
+	if newValue == nil {
+		newValue = ""
+	}
+
+	if oldValue == nil {
+		oldValue = ""
+	}
+
+	if isPrimitiveType(oldValue) {
+		return SendAuditLog(ctx, logcomapi.CreateAuditLogRequestDTO{
+			Category:    action,
+			NewValue:    stringify(newValue),
+			OldValue:    stringify(oldValue),
+			Subject:     subject,
+			SubjectName: &subjectName,
+		})
+	}
+
+	changes, err := GetModelChanges(oldValue, newValue, ignoredProperties...)
+	if err != nil {
+		err = sendConsoleLog(ctx, logcomapi.Error, "Failed to send audit log: "+err.Error())
+		if err != nil {
+			logError.Printf("Failed to send console log: %v\n", err)
+		}
+		return err
+	}
+
+	if len(changes) < 1 {
+		err = sendConsoleLog(ctx, logcomapi.Debug, "No changes")
+		if err != nil {
+			logError.Printf("Failed to send console log: %v\n", err)
+		}
+		return nil
+	}
+
+	return sendAuditLogWithCustomActionModelChanges(ctx, action, subject, subjectName, changes)
+}
+
+func sendAuditLogWithCustomActionModelChanges(ctx context.Context, action, subject, subjectName string, changes []ModelChange) error {
+	dto := logcomapi.CreateAuditLogRequestDTO{
+		Category:    action,
+		Subject:     subject,
+		SubjectName: &subjectName,
+	}
+
+	transformModelChangesToDTO(&dto, changes)
+
+	return sendAuditLog(ctx, dto)
 }
 
 func sendAuditLog(ctx context.Context, model logcomapi.CreateAuditLogRequestDTO) error {
