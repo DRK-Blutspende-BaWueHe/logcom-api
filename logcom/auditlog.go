@@ -46,7 +46,7 @@ type AuditLogOperation interface {
 	BatchCreate(subject string) BatchedAuditLogOperation
 	BatchDelete(subject string) BatchedAuditLogOperation
 	BatchModify(subject string) BatchedAuditLogOperation
-	BatchCustomAction(subject, action string) BatchedAuditLogOperation
+	BatchCustomAction(action, subject string) BatchedAuditLogOperation
 	Create(subject, subjectName string, newValue interface{}) AuditLogConfiguration
 	Modify(subject, subjectName string, oldValue, newValue interface{}) AuditLogConfiguration
 	Delete(subject, subjectName string, oldValue interface{}) AuditLogConfiguration
@@ -131,6 +131,16 @@ func AuditDeletion(subject, subjectName string, oldValue interface{}) AuditLogCo
 	return &auditLog[AuditLogAction]{
 		operation:   "DELETION",
 		oldValue:    oldValue,
+		subject:     subject,
+		subjectName: subjectName,
+	}
+}
+
+func AuditCustomAction(action, subject, subjectName string, oldValue interface{}, newValue interface{}) AuditLogConfiguration {
+	return &auditLog[AuditLogAction]{
+		operation:   action,
+		oldValue:    oldValue,
+		newValue:    newValue,
 		subject:     subject,
 		subjectName: subjectName,
 	}
@@ -248,18 +258,18 @@ func prepareAuditLogRequestDTO(dto *logcomapi.CreateAuditLogRequestDTO) {
 }
 
 func (al *auditLog[T]) BatchCreate(subject string) BatchedAuditLogOperation {
-	return al.BatchCustomAction(subject, "CREATION")
+	return al.BatchCustomAction("CREATION", subject)
 }
 
 func (al *auditLog[T]) BatchModify(subject string) BatchedAuditLogOperation {
-	return al.BatchCustomAction(subject, "MODIFICATION")
+	return al.BatchCustomAction("MODIFICATION", subject)
 }
 
 func (al *auditLog[T]) BatchDelete(subject string) BatchedAuditLogOperation {
-	return al.BatchCustomAction(subject, "DELETION")
+	return al.BatchCustomAction("DELETION", subject)
 }
 
-func (al *auditLog[T]) BatchCustomAction(subject string, action string) BatchedAuditLogOperation {
+func (al *auditLog[T]) BatchCustomAction(action, subject string) BatchedAuditLogOperation {
 	al.operation = strings.ToUpper(strings.TrimSpace(action))
 	al.subject = subject
 	return al
@@ -414,7 +424,7 @@ func (al *auditLog[T]) ModifyItem(subjectName string, oldValue, newValue interfa
 	return al
 }
 
-func (al *auditLog[T]) CustomActionItem(action string, subjectName string, oldValue interface{}, newValue interface{}) BatchedAuditLogOperation {
+func (al *auditLog[T]) CustomActionItem(action, subjectName string, oldValue interface{}, newValue interface{}) BatchedAuditLogOperation {
 	al.ensureBatchedAuditLogs(batchedCustomAction)
 	al.batchedAuditLogMap[batchedCustomAction].AddCustomAction(action, al.subject, subjectName, oldValue, newValue)
 	return al
