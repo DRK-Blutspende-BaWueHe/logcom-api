@@ -16,6 +16,7 @@ const (
 	batchedModification
 	batchedDeletion
 	batchedSubjectModification
+	batchedCustomAction
 )
 
 var batchedOperationList = []int{
@@ -23,6 +24,7 @@ var batchedOperationList = []int{
 	batchedModification,
 	batchedDeletion,
 	batchedSubjectModification,
+	batchedCustomAction,
 }
 
 type AuditLogAction interface {
@@ -44,9 +46,11 @@ type AuditLogOperation interface {
 	BatchCreate(subject string) BatchedAuditLogOperation
 	BatchDelete(subject string) BatchedAuditLogOperation
 	BatchModify(subject string) BatchedAuditLogOperation
+	BatchCustomAction(action, subject string) BatchedAuditLogOperation
 	Create(subject, subjectName string, newValue interface{}) AuditLogConfiguration
 	Modify(subject, subjectName string, oldValue, newValue interface{}) AuditLogConfiguration
 	Delete(subject, subjectName string, oldValue interface{}) AuditLogConfiguration
+	CustomAction(action, subject, subjectName string, oldValue interface{}, newValue interface{}) AuditLogConfiguration
 	GroupedModify(subject, subjectName string) GroupedModificationAuditLogOperation
 }
 
@@ -56,6 +60,7 @@ type BatchedAuditLogOperation interface {
 	ModifyItem(subjectName string, oldValue, newValue interface{}) BatchedAuditLogOperation
 	ModifyItemWithModelChanges(subjectName string, changes []ModelChange) BatchedAuditLogOperation
 	DeleteItem(subjectName string, oldValue interface{}) BatchedAuditLogOperation
+	CustomActionItem(action, subjectName string, oldValue interface{}, newValue interface{}) BatchedAuditLogOperation
 }
 
 type GroupedModificationAuditLogOperation interface {
@@ -64,6 +69,7 @@ type GroupedModificationAuditLogOperation interface {
 	AddModification(subject, subjectName string, oldValue, newValue interface{}) GroupedModificationAuditLogOperation
 	AddModificationWithModelChanges(subject, subjectName string, changes []ModelChange) GroupedModificationAuditLogOperation
 	AddDeletion(subject, subjectName string, oldValue interface{}) GroupedModificationAuditLogOperation
+	AddCustomEvent(action, subject, subjectName string, oldValue interface{}, newValue interface{}) GroupedModificationAuditLogOperation
 }
 
 type AuditLogModelDiff interface {
@@ -125,6 +131,16 @@ func AuditDeletion(subject, subjectName string, oldValue interface{}) AuditLogCo
 	return &auditLog[AuditLogAction]{
 		operation:   "DELETION",
 		oldValue:    oldValue,
+		subject:     subject,
+		subjectName: subjectName,
+	}
+}
+
+func AuditCustomAction(action, subject, subjectName string, oldValue interface{}, newValue interface{}) AuditLogConfiguration {
+	return &auditLog[AuditLogAction]{
+		operation:   action,
+		oldValue:    oldValue,
+		newValue:    newValue,
 		subject:     subject,
 		subjectName: subjectName,
 	}
@@ -242,19 +258,19 @@ func prepareAuditLogRequestDTO(dto *logcomapi.CreateAuditLogRequestDTO) {
 }
 
 func (al *auditLog[T]) BatchCreate(subject string) BatchedAuditLogOperation {
-	al.operation = "CREATION"
-	al.subject = subject
-	return al
+	return al.BatchCustomAction("CREATION", subject)
 }
 
 func (al *auditLog[T]) BatchModify(subject string) BatchedAuditLogOperation {
-	al.operation = "MODIFICATION"
-	al.subject = subject
-	return al
+	return al.BatchCustomAction("MODIFICATION", subject)
 }
 
 func (al *auditLog[T]) BatchDelete(subject string) BatchedAuditLogOperation {
-	al.operation = "DELETION"
+	return al.BatchCustomAction("DELETION", subject)
+}
+
+func (al *auditLog[T]) BatchCustomAction(action, subject string) BatchedAuditLogOperation {
+	al.operation = strings.ToUpper(strings.TrimSpace(action))
 	al.subject = subject
 	return al
 }
@@ -347,7 +363,7 @@ func (al *auditLog[T]) Send() error {
 		case "DELETION":
 			err = sendAuditLogWithDeletion(al.ctx, al.subject, al.subjectName, al.oldValue)
 		default:
-			err = errors.New("invalid audit operation: " + al.operation)
+			err = sendAuditLogWithCustomAction(al.ctx, al.operation, al.subject, al.subjectName, al.oldValue, al.newValue)
 		}
 
 		if err != nil {
@@ -376,25 +392,21 @@ func (al *auditLog[T]) Send() error {
 }
 
 func (al *auditLog[T]) Create(subject, subjectName string, newValue interface{}) AuditLogConfiguration {
-	al.operation = "CREATION"
-	al.newValue = newValue
-	al.subject = subject
-	al.subjectName = subjectName
-	return al
+	return al.CustomAction("CREATION", subject, subjectName, nil, newValue)
 }
 
 func (al *auditLog[T]) Modify(subject, subjectName string, oldValue, newValue interface{}) AuditLogConfiguration {
-	al.operation = "MODIFICATION"
-	al.oldValue = oldValue
-	al.newValue = newValue
-	al.subject = subject
-	al.subjectName = subjectName
-	return al
+	return al.CustomAction("MODIFICATION", subject, subjectName, oldValue, newValue)
 }
 
 func (al *auditLog[T]) Delete(subject, subjectName string, oldValue interface{}) AuditLogConfiguration {
-	al.operation = "DELETION"
+	return al.CustomAction("DELETION", subject, subjectName, oldValue, nil)
+}
+
+func (al *auditLog[T]) CustomAction(action, subject, subjectName string, oldValue interface{}, newValue interface{}) AuditLogConfiguration {
+	al.operation = strings.ToUpper(strings.TrimSpace(action))
 	al.oldValue = oldValue
+	al.newValue = newValue
 	al.subject = subject
 	al.subjectName = subjectName
 	return al
@@ -409,6 +421,12 @@ func (al *auditLog[T]) CreateItem(subjectName string, newValue interface{}) Batc
 func (al *auditLog[T]) ModifyItem(subjectName string, oldValue, newValue interface{}) BatchedAuditLogOperation {
 	al.ensureBatchedAuditLogs(batchedModification)
 	al.batchedAuditLogMap[batchedModification].AddModification(al.subject, subjectName, oldValue, newValue)
+	return al
+}
+
+func (al *auditLog[T]) CustomActionItem(action, subjectName string, oldValue interface{}, newValue interface{}) BatchedAuditLogOperation {
+	al.ensureBatchedAuditLogs(batchedCustomAction)
+	al.batchedAuditLogMap[batchedCustomAction].AddCustomAction(action, al.subject, subjectName, oldValue, newValue)
 	return al
 }
 
@@ -441,6 +459,11 @@ func (al *auditLog[T]) AddModificationWithModelChanges(subject, subjectName stri
 
 func (al *auditLog[T]) AddDeletion(subject, subjectName string, oldValue interface{}) GroupedModificationAuditLogOperation {
 	al.batchedAuditLogMap[batchedDeletion].AddDeletion(subject, subjectName, oldValue)
+	return al
+}
+
+func (al *auditLog[T]) AddCustomEvent(action, subject, subjectName string, oldValue interface{}, newValue interface{}) GroupedModificationAuditLogOperation {
+	al.batchedAuditLogMap[batchedCustomAction].AddCustomAction(action, subject, subjectName, oldValue, newValue)
 	return al
 }
 
@@ -489,6 +512,16 @@ func (c *AuditLogCollector) AddCreation(itemSubject, itemSubjectName string, new
 func (c *AuditLogCollector) AddModification(itemSubject, itemSubjectName string, oldValue, newValue interface{}) {
 	c.Add(logcomapi.CreateAuditLogRequestDTO{
 		Category:    "MODIFICATION",
+		NewValue:    stringify(newValue),
+		OldValue:    stringify(oldValue),
+		Subject:     itemSubject,
+		SubjectName: &itemSubjectName,
+	})
+}
+
+func (c *AuditLogCollector) AddCustomAction(action string, itemSubject, itemSubjectName string, oldValue, newValue interface{}) {
+	c.Add(logcomapi.CreateAuditLogRequestDTO{
+		Category:    strings.ToUpper(strings.TrimSpace(action)),
 		NewValue:    stringify(newValue),
 		OldValue:    stringify(oldValue),
 		Subject:     itemSubject,

@@ -351,6 +351,62 @@ err := auditBatch.WithContext(ctx).
     Send()
 ```
 
+#### Custom Action - OneShot sending
+
+Function to use: `sendAuditLogWithCustomAction(ctx context.Context, action, subject, subjectName string, oldValue, newValue interface{}, ignoredProperties ...string)`
+
+- `ctx`: The context which contains the `Authorization` key and its value
+- `action`: The custom action type as string
+- `subject`: The created subject
+- `subjectName`: The unique identifier or name of the subject
+- `oldValue`: The original object. **Nullable**. Use `nil` when the event's old object data is not important
+- `newValue`: The created object. **Nullable**. Use `nil` when the event's new object data is not important
+
+Example:
+
+```go
+err := logcom.sendAuditLogWithCustomAction(ctx, "MY_CUSTOM_ACTION", "MATERIAL", "ANTIG", oldMaterialDTO, newMaterialDTO)
+```
+
+#### Custom Action - Builder based
+
+Functions to use:
+
+- `logcom.Audit().CustomAction(action, subject, subjectName string, oldValue, newValue interface{})`
+- `logcom.AuditCustomAction(action, subject, subjectName string, oldValue, newValue interface{})`
+
+Example:
+
+```go
+err := logcom.AuditCustomAction("MY_CUSTOM_ACTION","MATERIAL", "ANTIG", oldMaterialDTO, newMaterialDTO).
+    WithContext(ctx).
+    OnComplete(func(err error) {
+        if err != nil {
+            _ = txConn.Rollback()
+        }
+    }).
+    Send()
+```
+
+#### Custom Action - Batched
+
+Function to use: `logcom.Audit().BatchCustomAction(action, subject string)`
+
+Example:
+
+```go
+auditBatch := logcom.Audit().
+BatchCustomAction("MY_CUSTOM_ACTION","ORDER")
+for _, order := range orders {
+	oldValue := order.SomeField
+	.....
+    
+    auditBatch.CustomActionItem("MY_CUSTOM_ACTION", order.ID, oldValue, newValue)	
+}
+err := auditBatch.WithContext(ctx).
+    Send()
+```
+
 ### Notification
 
 #### OneShot sending
@@ -391,6 +447,7 @@ err := logcom.Notify().
     - `logcom.AuditCreation(subject, subjectName string, newValue interface{})`
     - `logcom.AuditModification(subject, subjectName string, oldValue, newValue interface{})`
     - `logcom.AuditDeletion(subject, subjectName string, oldValue interface{})`
+    - `logcom.AuditCustomAction(action, subject, subjectName string, oldValue interface{}, newValue interface{})`
     - `logcom.Notify()`
     - `logcom.Log()`
 
@@ -403,6 +460,7 @@ err := logcom.Notify().
         - `Create(subject, subjectName string, newValue interface{})`
         - `Modify(subject, subjectName string, oldValue, newValue interface{})`
         - `Delete(subject, subjectName string, oldValue interface{})`
+        - `CustomAction(action, subject, subjectName string, oldValue interface{}, newValue interface{})`
         - `BatchCreate(subject string)`
             - `CreateItem(subjectName string, newValue interface{})`
         - `BatchModify(subject string)`
@@ -410,7 +468,9 @@ err := logcom.Notify().
             - `ModifyItem(subjectName string, oldValue, newValue interface{})`
             - `DeleteItem(subjectName string, oldValue interface{})`
         - `BatchDelete(subject string)`
-            - `DeleteItem(subjectName string, oldValue interface{})`
+            - `DeleteItem(subjectName string, oldValue interface{})`        
+        - `BatchCustomAction(action, subject string)`
+          - `CustomActionItem(action, subjectName string, oldValue interface{}, newValue interface{})`
         - `GroupedModify(subject, subjectName string)`
             - `AddCreation(subject, subjectName string, newValue interface{})`
             - `AddModification(subject, subjectName string, oldValue, newValue interface{})`
@@ -462,6 +522,15 @@ err := logcom.Notify().
 
 - Adds a modification change to the grouped audit log
 - `subject`: The modified subject
+- `subjectName`: The unique identifier or name of the subject
+- `oldValue`: The original object
+- `newValue`: The modified object
+
+`AddCustomEvent(action, subject, subjectName string, oldValue interface{}, newValue interface{})`
+
+- Adds a custom eevent to the grouped audit log
+- `action`: The custom event
+- `subject`: The event subject
 - `subjectName`: The unique identifier or name of the subject
 - `oldValue`: The original object
 - `newValue`: The modified object
